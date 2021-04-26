@@ -3,6 +3,9 @@ package com.data;
 import com.google.appengine.api.blobstore.BlobKey;
 import com.google.appengine.api.blobstore.BlobstoreService;
 import com.google.appengine.api.blobstore.BlobstoreServiceFactory;
+import com.google.appengine.api.images.ImagesService;
+import com.google.appengine.api.images.ImagesServiceFactory;
+import com.google.appengine.api.images.ServingUrlOptions;
 import com.google.cloud.vision.v1.*;
 import com.google.protobuf.ByteString;
 import com.google.protobuf.Descriptors;
@@ -16,6 +19,7 @@ import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.io.*;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -26,21 +30,28 @@ public class CloudVisionServlet extends HttpServlet {
 	private static  String TEST_FILENAME = "whiter.jpg";
 	
     protected void doPost(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
-    	 
-    //	ArrayList<String> photoID = new ArrayList<String>(Arrays.asList(request.getParameterValues("imageID")[0].split(",")));
-    // ArrayList<String> imageLinks = new ArrayList<String>(Arrays.asList(request.getParameterValues("imageLinks")[0].split(",")));
-		
-    	
-    	
-   	 Map<String, List<BlobKey>> blobs = blobstoreService.getUploads(request);
+		  	
+		Map<String,String> hm = new HashMap<>();
+	 	Map<String, List<BlobKey>> blobs = blobstoreService.getUploads(request);
 		  List<BlobKey> blobKeys = blobs.get("fileToUpload");
+		  
+		    // Our form only contains a single file input, so get the first index.
+		    BlobKey blobKey = blobKeys.get(0);
+	
+		    // Use ImagesService to get a URL that points to the uploaded file.
+		    ImagesService imagesService = ImagesServiceFactory.getImagesService();
+		    ServingUrlOptions options = ServingUrlOptions.Builder.withBlobKey(blobKey);
+		    String imageUrl = imagesService.getServingUrl(options);
+		    
+		    System.out.println("imageUrl --> " + imageUrl);
+		    
+		    hm.put("imageSource", imageUrl);
 		  
 		  if (blobKeys == null || blobKeys.isEmpty()) { response.sendRedirect("/"); }
 		  else {
 		  		  
 		  byte[] blobBytes = getBlobBytes(blobKeys.get(0)); 
-		  List<AnnotateImageResponse> imageLabels = generateLabel(blobBytes);
-		  
+		  List<AnnotateImageResponse> imageLabels = generateLabel(blobBytes);	  
 		  
 		  //List<AnnotateImageResponse> labelResponses = generateLabel(filePath); 
 		  for(AnnotateImageResponse res : imageLabels) {
@@ -48,14 +59,32 @@ public class CloudVisionServlet extends HttpServlet {
 			  response.getWriter().println("Error: %s%n" + res.getError().getMessage()); 
 			  }
 		  
+			  
+			  
 		  for (EntityAnnotation annotation : res.getLabelAnnotationsList()) {
 			  Map<Descriptors.FieldDescriptor, Object> fields = annotation.getAllFields();
-			  for(Descriptors.FieldDescriptor fd: fields.keySet()){
-			  if(!fd.getName().contains("mid") && !fd.getName().contains("topicality"))
-			  request.setAttribute(fd.getJsonName(), fields.get(fd).toString());
-			  response.getWriter().println(fd.getJsonName() + ":" +
-			  fields.get(fd).toString()); } 
+			  String key ="", value = "";
+				  for(Descriptors.FieldDescriptor fd: fields.keySet()){
+					  
+					  if(!fd.getName().contains("mid") && !fd.getName().contains("topicality")) {
+						  
+						  if(fd.getJsonName().equalsIgnoreCase("description")) {
+							  key = fields.get(fd).toString();
+						  }
+						  
+						  if(fd.getJsonName().equalsIgnoreCase("score")) {
+							  value = fields.get(fd).toString();
+						  }
+						  response.getWriter().println(fd.getJsonName() + ":" +fields.get(fd).toString());
+						  
+						  
+					
+					  }
+				  } 
+				  hm.put(key, value);
 			  }
+		  request.setAttribute("data1", hm);
+		
 		  
 		  for (FaceAnnotation annotation : res.getFaceAnnotationsList()) {
 		  Map<Descriptors.FieldDescriptor, Object> fields = annotation.getAllFields();
@@ -70,6 +99,8 @@ public class CloudVisionServlet extends HttpServlet {
 		  }
 		  
 		  }
+	
+		    
 		  RequestDispatcher dispatcher = getServletContext().getRequestDispatcher("/insert"); 
 		  try { 
 			  dispatcher.forward(request,response); 
@@ -80,7 +111,7 @@ public class CloudVisionServlet extends HttpServlet {
 		 
 		  
 	
-    }
+	}
 
     private List<AnnotateImageResponse> generateLabel(byte[] imgBytes) throws IOException {
     	//generateLabel(String filePath) use this signature for local uplaod
